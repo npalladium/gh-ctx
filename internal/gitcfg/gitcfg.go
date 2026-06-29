@@ -7,7 +7,9 @@ package gitcfg
 import (
 	"bytes"
 	"errors"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 
 	"github.com/npalladium/gh-ctx/internal/resolve"
@@ -119,13 +121,32 @@ func Email(dir string) string {
 }
 
 func fileValue(file, key string) string {
-	v, _ := optional("git", "config", "--file", file, "--get", key)
+	v, _ := optional("git", "config", "--file", expandHome(file, homeDir()), "--get", key)
 	return v
 }
 
 func fileBool(file, key string) bool {
-	v, _ := optional("git", "config", "--file", file, "--get", "--bool", key)
+	v, _ := optional("git", "config", "--file", expandHome(file, homeDir()), "--get", "--bool", key)
 	return v == "true"
+}
+
+func homeDir() string { h, _ := os.UserHomeDir(); return h }
+
+// expandHome resolves a leading "~" in an includeIf path against home. git
+// expands "~" itself when resolving includes in-repo, but `git config --file`
+// receives the raw value and (running without a shell) treats "~" literally, so
+// gh-ctx must expand it before reading the included file directly.
+func expandHome(p, home string) string {
+	if home == "" {
+		return p
+	}
+	if p == "~" {
+		return home
+	}
+	if strings.HasPrefix(p, "~/") {
+		return filepath.Join(home, p[2:])
+	}
+	return p
 }
 
 // output runs a command and returns trimmed stdout, erroring on any failure.
