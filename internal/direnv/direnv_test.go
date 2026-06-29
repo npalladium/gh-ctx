@@ -83,3 +83,36 @@ func TestEnvrcBodySkipClearsEnv(t *testing.T) {
 		t.Fatalf("skip body must clear gh env, got %q", body)
 	}
 }
+
+// Other tools may keep their own entries both above and below the gh-ctx block.
+// Regenerating must rewrite only our block, leave both neighbours byte-for-byte
+// intact, and be a no-op when the body is unchanged.
+func TestUpsertBlockPreservesSurroundingToolEntries(t *testing.T) {
+	before := "# asdf\nuse asdf\n\n"
+	after := "\n# some other tool\nlayout python\n"
+	orig := before + begin + "\n" + "use gh_ctx a" + "\n" + end + after
+
+	// Same body: no change.
+	out, changed := upsertBlock(orig, "use gh_ctx a")
+	if changed || out != orig {
+		t.Fatalf("re-applying same block must be a no-op; changed=%v\n%q", changed, out)
+	}
+
+	// Changed body: only our block is rewritten; both neighbours survive.
+	out, changed = upsertBlock(orig, "use gh_ctx b")
+	if !changed {
+		t.Fatal("changed body should update")
+	}
+	if !strings.HasPrefix(out, before) {
+		t.Fatalf("content before block not preserved: %q", out)
+	}
+	if !strings.HasSuffix(out, after) {
+		t.Fatalf("content after block not preserved: %q", out)
+	}
+	if strings.Count(out, begin) != 1 || strings.Count(out, end) != 1 {
+		t.Fatalf("must keep exactly one marker pair: %q", out)
+	}
+	if strings.Contains(out, "use gh_ctx a") {
+		t.Fatalf("old body should be gone: %q", out)
+	}
+}
