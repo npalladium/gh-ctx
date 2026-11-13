@@ -2,6 +2,7 @@ package direnv
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -114,5 +115,88 @@ func TestUpsertBlockPreservesSurroundingToolEntries(t *testing.T) {
 	}
 	if strings.Contains(out, "use gh_ctx a") {
 		t.Fatalf("old body should be gone: %q", out)
+	}
+}
+
+func TestRcFunctionAccountSelection(t *testing.T) {
+	bash, err := exec.LookPath("bash")
+	if err != nil {
+		t.Fatal("bash is required to exercise the direnv integration")
+	}
+	for _, tt := range []struct {
+		name string
+		mode string
+		host string
+		want string
+	}{
+		{"default host", "success", "", "0|selected-token|github.com"},
+		{"enterprise host", "success", "github.example.com", "0|selected-token|github.example.com"},
+		{"missing token", "missing", "", "1|unset|unset"},
+		{"empty token", "empty", "", "1|unset|unset"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			script := RcFunction + `
+log_error() { printf '%s\n' "$*" >&2; }
+gh() {
+  [ "$1" = auth ] && [ "$2" = token ] &&
+    [ "$3" = --user ] && [ "$4" = requested-account ] &&
+    [ "$5" = --hostname ] && [ "$6" = "${TEST_HOST:-github.com}" ] || return 2
+  case "$TEST_MODE" in
+    success) printf '%s\n' selected-token ;;
+    missing) return 1 ;;
+    empty) return 0 ;;
+  esac
+}
+export GH_TOKEN=inherited-token GH_HOST=previous.example.com
+use_gh_ctx requested-account "${TEST_HOST:-github.com}"
+result=$?
+printf '%s|%s|%s' "$result" "${GH_TOKEN-unset}" "${GH_HOST-unset}"
+`
+			cmd := exec.Command(bash, "--noprofile", "--norc", "-c", script)
+			cmd.Env = []string{"HOME=" + t.TempDir(), "TEST_MODE=" + tt.mode, "TEST_HOST=" + tt.host}
+			var stderr strings.Builder
+			cmd.Stderr = &stderr
+			out, err := cmd.Output()
+			if err != nil {
+				t.Fatalf("shell failed: %v: %s", err, stderr.String())
+			}
+			if string(out) != tt.want {
+				t.Fatalf("account selection = %q, want %q", out, tt.want)
+			}
+			if tt.mode == "success" {
+				if stderr.Len() != 0 {
+					t.Fatalf("successful selection logged an error: %s", stderr.String())
+				}
+			} else if !strings.Contains(stderr.String(), "no gh token") {
+				t.Fatalf("missing authentication diagnostic: %s", stderr.String())
+			}
+			if strings.Contains(stderr.String(), "inherited-token") || strings.Contains(stderr.String(), "selected-token") {
+				t.Fatal("authentication diagnostic exposed a token")
+			}
+		})
+	}
+}
+
+func TestRcFunctionStopsFailedEnvironmentLoad(t *testing.T) {
+	bash, err := exec.LookPath("bash")
+	if err != nil {
+		t.Fatal("bash is required to exercise the direnv integration")
+	}
+	script := RcFunction + `
+set -e
+log_error() { :; }
+gh() { return 1; }
+export GH_TOKEN=inherited-token GH_HOST=previous.example.com
+use_gh_ctx requested-account
+printf 'environment-loaded'
+`
+	cmd := exec.Command(bash, "--noprofile", "--norc", "-c", script)
+	cmd.Env = []string{"HOME=" + t.TempDir()}
+	out, err := cmd.CombinedOutput()
+	if err == nil {
+		t.Fatal("failed authentication must reject the environment load")
+	}
+	if len(out) != 0 {
+		t.Fatalf("environment continued after failed authentication: %q", out)
 	}
 }

@@ -61,6 +61,12 @@ each supported directory root. Existing `.envrc` files not managed by `gh-ctx`
 are left unchanged and reported; add `use gh_ctx <account> [host]` to those
 files manually.
 
+If the selected account has no usable token, the helper reports an error,
+clears inherited `GH_TOKEN`/`GH_HOST` in the loading shell, and returns failure
+instead of accepting the environment with the previous account. Authenticate
+that account with `gh auth login`, then reload direnv. After upgrading `gh-ctx`,
+rerun `gh ctx install-direnv` to update the generated helper.
+
 Trust newly created files:
 
 ```sh

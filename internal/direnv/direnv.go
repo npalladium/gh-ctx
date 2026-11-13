@@ -23,9 +23,10 @@ use_gh_ctx() {
   local account="$1" host="${2:-github.com}"
   [ -n "$account" ] || return 0
   local token
-  if ! token="$(gh auth token --user "$account" --hostname "$host" 2>/dev/null)"; then
+  if ! token="$(gh auth token --user "$account" --hostname "$host" 2>/dev/null)" || [ -z "$token" ]; then
+    unset GH_TOKEN GH_HOST
     log_error "gh-ctx: no gh token for '$account' on $host (try: gh auth login --hostname $host --user $account)"
-    return 0
+    return 1
   fi
   export GH_HOST="$host"
   export GH_TOKEN="$token"
